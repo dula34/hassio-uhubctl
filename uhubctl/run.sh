@@ -14,10 +14,18 @@ while true; do
     if ! bashio::services.available "mqtt"; then
         bashio::log.warning "No MQTT service running! Retry after 30 seconds..."
     else
+        bashio::log.info "MQTT service is available, fetching credentials..."
+
         export MQTT_HOST=$(bashio::services "mqtt" "host")
         export MQTT_PORT=$(bashio::services "mqtt" "port")
         export MQTT_USERNAME=$(bashio::services "mqtt" "username")
         export MQTT_PASSWORD=$(bashio::services "mqtt" "password")
+
+        bashio::log.info "MQTT_HOST=${MQTT_HOST}"
+        bashio::log.info "MQTT_PORT=${MQTT_PORT}"
+        bashio::log.info "MQTT_USERNAME=${MQTT_USERNAME}"
+
+        bashio::log.info "Launching Python bridge..."
 
         if python3 main.py --log "${LOG_LEVEL}"; then
             bashio::log.info "Bridge stopped normally"

@@ -286,13 +286,11 @@ class USBHUB_MQTT:
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc != 0:
-            raise USBHUB_MQTT_Error(
-                "Error while connecting to the MQTT broker. Reason code: {}".format(
-                    str(rc)
-                )
-            )
-        else:
-            logger.info("MQTT Connected successfully")
+            logger.error("MQTT connection failed with reason code: {}".format(str(rc)))
+            logger.error("Connection failed - will attempt to reconnect...")
+            return
+
+        logger.info("MQTT Connected successfully")
 
         result, mid = client.subscribe(self._cfg["COMMAND_TOPIC"] + "/#", 1)
         logger.info(
@@ -313,6 +311,16 @@ class USBHUB_MQTT:
         client.publish(
             topic=self._cfg["AVAILABILITY_TOPIC"], payload="Online", qos=1, retain=True
         )
+
+    def on_mqtt_disconnect(self, client, userdata, rc):
+        if rc == 0:
+            logger.info("MQTT Disconnected cleanly")
+        else:
+            logger.warning("MQTT Connection lost (rc={})".format(str(rc)))
+
+    def on_mqtt_message(self, client, userdata, message):
+        """Generic message handler - routed to specific handlers via message_callback_add"""
+        pass
 
     def on_mqtt_ctrl_message(self, client, userdata, message):
         logger.info(
@@ -367,37 +375,58 @@ class USBHUB_MQTT:
             mqtt_password = os.environ.get("MQTT_PASSWORD")
 
             if not all([mqtt_hostname, mqtt_port_str, mqtt_username, mqtt_password]):
-                raise KeyError("Missing required MQTT environment variables")
+                missing = []
+                if not mqtt_hostname:
+                    missing.append("MQTT_HOST")
+                if not mqtt_port_str:
+                    missing.append("MQTT_PORT")
+                if not mqtt_username:
+                    missing.append("MQTT_USERNAME")
+                if not mqtt_password:
+                    missing.append("MQTT_PASSWORD")
+                raise KeyError("Missing required MQTT environment variables: {}".format(", ".join(missing)))
 
             try:
                 mqtt_port = int(mqtt_port_str)
             except ValueError:
-                raise ValueError("MQTT_PORT must be a valid integer")
+                raise ValueError("MQTT_PORT must be a valid integer, got: {}".format(mqtt_port_str))
 
-            logger.debug(
-                "MQTT Server: mqtt://{username}:<secret>@{host}:{port}".format(
-                    username=mqtt_username,
-                    host=mqtt_hostname,
-                    port=mqtt_port,
-                )
-            )
+            logger.info("MQTT Configuration found:")
+            logger.info("  Host: {}".format(mqtt_hostname))
+            logger.info("  Port: {}".format(mqtt_port))
+            logger.info("  Username: {}".format(mqtt_username))
+
         except (KeyError, ValueError) as e:
-            logger.exception("Failed to fetch local MQTT configurations: {}".format(str(e)))
+            logger.error("Configuration error: {}".format(str(e)))
             return False
 
         try:
+            logger.info("Creating MQTT client...")
             mqc = mqtt.Client(CallbackAPIVersion.VERSION1)
+
             mqc.on_connect = self.on_mqtt_connect
+            mqc.on_disconnect = self.on_mqtt_disconnect
+            mqc.on_message = self.on_mqtt_message
             mqc.message_callback_add(
                 self._cfg["COMMAND_TOPIC"] + "/#", self.on_mqtt_ctrl_message
             )
+
             mqc.username_pw_set(mqtt_username, mqtt_password)
             mqc.will_set(*self._will)
 
-            mqc.connect(mqtt_hostname, mqtt_port)
+            logger.info("Connecting to MQTT broker at {}:{}".format(mqtt_hostname, mqtt_port))
+            mqc.connect(mqtt_hostname, mqtt_port, keepalive=60)
+
+            logger.info("Starting MQTT event loop...")
             mqc.loop_forever()
-        except Exception:
-            logger.exception("MQTT connection failed")
+
+        except OSError as e:
+            logger.error("Network error: {}".format(str(e)))
+            logger.info("Is the MQTT broker running at {}:{}?".format(mqtt_hostname, mqtt_port))
+            return False
+        except Exception as e:
+            logger.error("MQTT error: {}".format(str(e)))
+            logger.exception("Full stack trace")
             return False
 
 
