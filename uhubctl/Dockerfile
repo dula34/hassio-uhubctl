@@ -2,10 +2,13 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/base:20.1.1
 
 FROM ${BUILD_FROM}
 
-# Install build dependencies and compile uhubctl
+# Install Python and build dependencies
 RUN \
     set -e \
-    && apk add --no-cache --virtual .build-dependencies \
+    && apk add --no-cache \
+        python3 \
+        py3-pip && \
+    apk add --no-cache --virtual .build-dependencies \
         build-base \
         linux-headers \
         libusb-dev \
@@ -22,7 +25,7 @@ COPY . /app
 WORKDIR /app
 
 # Install Python dependencies
-RUN python3 -m pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Set execution permissions
 RUN chmod a+x run.sh
