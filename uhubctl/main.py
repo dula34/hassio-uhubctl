@@ -7,6 +7,7 @@ import re
 import subprocess
 
 import paho.mqtt.client as mqtt
+from paho.mqtt.client import CallbackAPIVersion
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -99,10 +100,12 @@ class UHUBCTL:
                 index for index, line in enumerate(result) if "status for hub" in line
             ]
             if not len(lineidxs_hubheader) > 0:
-                raise ValueError
-        except ValueError:
-            logger.error("Failed to find any smart hubs")
+                raise ValueError("No hub headers found")
+        except ValueError as e:
+            logger.error("Failed to find any smart hubs: {}".format(str(e)))
             return False
+
+        logger.debug("Found {count} hub(s) in output".format(count=len(lineidxs_hubheader)))
 
         for lineidx_hubheader in lineidxs_hubheader:
             parsed_line = re.search(
@@ -170,7 +173,7 @@ class UHUBCTL:
             stdout = ret.stdout
 
             return self._parser(stdout)
-        except:
+        except Exception:
             logger.exception("Failed to fetch current status")
             return None
 
@@ -209,7 +212,7 @@ class UHUBCTL:
                 port.off()
 
             return True
-        except:
+        except Exception:
             logger.exception(
                 "Failed to change port status: hub={location}, port={port}, action={action}".format(
                     location=port.hub_location, port=port.number, action=action
@@ -228,6 +231,14 @@ class USBHUB_MQTT:
             self._cfg = json.load(opt_file)
             self._usbhubs = []
             self._will = (self._cfg["AVAILABILITY_TOPIC"], "Offline", 1, True)
+        
+        # Validate required config keys
+        required_keys = ["AVAILABILITY_TOPIC", "STATUS_TOPIC", "COMMAND_TOPIC"]
+        for key in required_keys:
+            if key not in self._cfg:
+                raise USBHUB_MQTT_Error("Missing required configuration: {}".format(key))
+        
+        logger.info("Configuration loaded successfully")
 
     def make_json_portstatus(self, usbhub):
         ret = {
@@ -247,6 +258,10 @@ class USBHUB_MQTT:
     def send_mqtt_hubstatus(self, client, usbhub=None):
         usbhubs = self._usbhubs if usbhub is None else [usbhub]
 
+        if not usbhubs:
+            logger.debug("No USB hubs to report status for")
+            return
+
         for usbhub in usbhubs:
             topic = "{prefix}/HUB{location}/STATE".format(
                 prefix=self._cfg["STATUS_TOPIC"], location=usbhub.location
@@ -259,12 +274,15 @@ class USBHUB_MQTT:
                 )
             )
 
-            client.publish(
-                topic=topic,
-                payload=payload,
-                qos=1,
-                retain=True,
-            )
+            try:
+                client.publish(
+                    topic=topic,
+                    payload=payload,
+                    qos=1,
+                    retain=True,
+                )
+            except Exception:
+                logger.exception("Failed to publish hub status to MQTT")
 
     def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc != 0:
@@ -285,6 +303,11 @@ class USBHUB_MQTT:
         )
 
         self._usbhubs = UHUBCTL().fetch_allinfo()
+        if self._usbhubs is None:
+            logger.warning("No USB hubs found. Will retry on next connection.")
+            self._usbhubs = []
+        else:
+            logger.info("Found {count} USB hub(s)".format(count=len(self._usbhubs)))
 
         self.send_mqtt_hubstatus(client)
         client.publish(
@@ -298,41 +321,59 @@ class USBHUB_MQTT:
             )
         )
 
+        if not self._usbhubs:
+            logger.warning("No USB hubs available. Ignoring control message.")
+            return False
+
         # Topic will be "hoge/usbhub/HUB1-3/POWER1
         parsed_topic = message.topic.split("/")
         try:
             command = parsed_topic[-1]
             hub_name = parsed_topic[-2]
             hub_location = re.search(r"HUB([0-9-]+)", hub_name).group(1)
-        except IndexError:
+        except (IndexError, AttributeError):
             logger.error("Failed to parse the topic string")
             return False
 
         parsed_command = re.search(r"([A-Z]+)(\d+)", command)
+        if parsed_command is None:
+            logger.error("Failed to parse the command string")
+            return False
 
         if parsed_command.group(1) == "POWER":
+            hub = None
             try:
                 port_number = int(parsed_command.group(2))
                 hub = [hub for hub in self._usbhubs if hub.location == hub_location][0]
                 port = [port for port in hub._ports if port.number == port_number][0]
-            except IndexError:
-                logger.error("Illigal action request to unknown hub / port")
+            except (IndexError, ValueError):
+                logger.error("Illegal action request to unknown hub / port")
                 return False
 
             try:
                 action = message.payload.decode()
                 UHUBCTL().do_action(port, action)
-            except:
+            except Exception:
                 logger.exception("Failed to execute an action")
 
-        self.send_mqtt_hubstatus(client, hub)
+            if hub is not None:
+                self.send_mqtt_hubstatus(client, hub)
 
     def loop_forever(self):
         try:
-            mqtt_hostname = os.environ["MQTT_HOST"]
-            mqtt_port = int(os.environ["MQTT_PORT"])
-            mqtt_username = os.environ["MQTT_USERNAME"]
-            mqtt_password = os.environ["MQTT_PASSWORD"]
+            mqtt_hostname = os.environ.get("MQTT_HOST")
+            mqtt_port_str = os.environ.get("MQTT_PORT")
+            mqtt_username = os.environ.get("MQTT_USERNAME")
+            mqtt_password = os.environ.get("MQTT_PASSWORD")
+
+            if not all([mqtt_hostname, mqtt_port_str, mqtt_username, mqtt_password]):
+                raise KeyError("Missing required MQTT environment variables")
+
+            try:
+                mqtt_port = int(mqtt_port_str)
+            except ValueError:
+                raise ValueError("MQTT_PORT must be a valid integer")
+
             logger.debug(
                 "MQTT Server: mqtt://{username}:<secret>@{host}:{port}".format(
                     username=mqtt_username,
@@ -340,41 +381,52 @@ class USBHUB_MQTT:
                     port=mqtt_port,
                 )
             )
-        except KeyError:
-            logger.exception("Failed to fetch local MQTT configurations")
+        except (KeyError, ValueError) as e:
+            logger.exception("Failed to fetch local MQTT configurations: {}".format(str(e)))
             return False
 
-        mqc = mqtt.Client()
-        mqc.on_connect = self.on_mqtt_connect
-        mqc.message_callback_add(
-            self._cfg["COMMAND_TOPIC"] + "/#", self.on_mqtt_ctrl_message
-        )
-        mqc.username_pw_set(mqtt_username, mqtt_password)
-        mqc.will_set(*self._will)
+        try:
+            mqc = mqtt.Client(CallbackAPIVersion.VERSION1)
+            mqc.on_connect = self.on_mqtt_connect
+            mqc.message_callback_add(
+                self._cfg["COMMAND_TOPIC"] + "/#", self.on_mqtt_ctrl_message
+            )
+            mqc.username_pw_set(mqtt_username, mqtt_password)
+            mqc.will_set(*self._will)
 
-        mqc.connect(mqtt_hostname, mqtt_port)
-
-        mqc.loop_forever()
+            mqc.connect(mqtt_hostname, mqtt_port)
+            mqc.loop_forever()
+        except Exception:
+            logger.exception("MQTT connection failed")
+            return False
 
 
 if __name__ == "__main__":
-    argp = argparse.ArgumentParser(description="MQTT - uhubctl bridge")
-    argp.add_argument(
-        "-c",
-        "--config",
-        type=argparse.FileType(),
-        default="/data/options.json",
-        help="User configuration file genereted by Home Assistant",
-    )
+    try:
+        argp = argparse.ArgumentParser(description="MQTT - uhubctl bridge")
+        argp.add_argument(
+            "-c",
+            "--config",
+            type=argparse.FileType(),
+            default="/data/options.json",
+            help="User configuration file generated by Home Assistant",
+        )
 
-    log_levels = ["DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"]
-    log_levels = log_levels + list(map(lambda w: w.lower(), log_levels))
-    argp.add_argument("--log", choices=log_levels, default="INFO", help="Logging level")
+        log_levels = ["DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"]
+        log_levels = log_levels + list(map(lambda w: w.lower(), log_levels))
+        argp.add_argument("--log", choices=log_levels, default="INFO", help="Logging level")
 
-    args = vars(argp.parse_args())
+        args = vars(argp.parse_args())
 
-    logger.setLevel(level=args["log"].upper())
-    handler.setLevel(level=args["log"].upper())
+        logger.setLevel(level=args["log"].upper())
+        handler.setLevel(level=args["log"].upper())
 
-    usbhub_mqtt = USBHUB_MQTT(args["config"])
-    usbhub_mqtt.loop_forever()
+        logger.info("Starting MQTT - uhubctl bridge v1.0.0")
+        usbhub_mqtt = USBHUB_MQTT(args["config"])
+        usbhub_mqtt.loop_forever()
+    except USBHUB_MQTT_Error as e:
+        logger.error("Configuration error: {}".format(str(e)))
+        exit(1)
+    except Exception:
+        logger.exception("Fatal error during startup")
+        exit(1)
