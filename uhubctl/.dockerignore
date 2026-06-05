@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Documentation
+README.md
+docs/
+images/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.env
+
+# Misc
+.DS_Store
+LICENSE
+
