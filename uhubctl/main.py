@@ -9,7 +9,7 @@ import subprocess
 import paho.mqtt.client as mqtt
 from paho.mqtt.client import CallbackAPIVersion
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -34,13 +34,14 @@ def run_in_shell(command, timeout=10):
 
 
 class USBHUB:
-    def __init__(self, location, vid, pid, usbversion, nports, ports):
+    def __init__(self, location, vid, pid, usbversion, nports, ports, powerswitching="unknown"):
         self._location = location
         self._vid = vid
         self._pid = pid
         self._usbversion = usbversion
         self._nports = nports
         self._ports = ports
+        self._powerswitching = powerswitching
 
     def add_port(self, number, status):
         self._ports.append(USBPORT(self.location, number, status))
@@ -64,6 +65,10 @@ class USBHUB:
     @property
     def nports(self):
         return self._nports
+
+    @property
+    def powerswitching(self):
+        return self._powerswitching
 
 
 class USBPORT:
@@ -111,7 +116,7 @@ class UHUBCTL:
 
         for lineidx_hubheader in lineidxs_hubheader:
             parsed_line = re.search(
-                r"status for hub ([0-9A-Za-z_.:-]+) \[([0-9a-fA-F]{4}):([0-9a-fA-F]{4}).*USB (\d)\.\d{2}, (\d+) ports, [a-z]{4}",
+                r"status for hub ([0-9A-Za-z_.:-]+) \[([0-9a-fA-F]{4}):([0-9a-fA-F]{4}).*USB (\d)\.\d{2}, (\d+) ports, ([^\]]+)\]",
                 result[lineidx_hubheader],
             )
             if parsed_line is None:
@@ -124,6 +129,7 @@ class UHUBCTL:
                 usbversion=int(parsed_line.group(4)),
                 nports=int(parsed_line.group(5)),
                 ports=[],
+                powerswitching=parsed_line.group(6).strip().lower(),
             )
 
             lineidx_port_start = lineidx_hubheader + 1
@@ -372,6 +378,27 @@ class USBHUB_MQTT:
             except Exception:
                 logger.exception("Failed to publish hub status to MQTT")
 
+    def _supports_per_port_control(self, usbhub):
+        return usbhub.powerswitching in {"ppps", "individual", "per-port", "per_port"}
+
+    def _log_hub_capabilities(self):
+        if not self._usbhubs:
+            return
+
+        for hub in self._usbhubs:
+            logger.info(
+                "Hub %s capability: power_switching=%s",
+                hub.location,
+                hub.powerswitching,
+            )
+            if not self._supports_per_port_control(hub):
+                logger.warning(
+                    "Hub %s may not support true per-port power switching (mode=%s). "
+                    "Toggling one port can affect the whole hub.",
+                    hub.location,
+                    hub.powerswitching,
+                )
+
     def on_mqtt_connect(self, client, userdata, flags, rc):
         if rc != 0:
             logger.error("MQTT connection failed with reason code: {}".format(str(rc)))
@@ -393,6 +420,7 @@ class USBHUB_MQTT:
             logger.warning("No USB hubs found or uhubctl not available")
         else:
             logger.info("Found {count} USB hub(s)".format(count=len(self._usbhubs)))
+            self._log_hub_capabilities()
 
         self.send_mqtt_discovery(client)
         self.send_mqtt_hubstatus(client)
@@ -450,6 +478,8 @@ class USBHUB_MQTT:
                 logger.error("Illegal action request to unknown hub / port")
                 return False
 
+            before_map = self._port_state_map(hub)
+
             try:
                 action = payload.strip()
                 action_ok = UHUBCTL().do_action(port, action)
@@ -458,7 +488,65 @@ class USBHUB_MQTT:
                 action_ok = False
 
             if hub is not None and action_ok:
+                refreshed_hubs = UHUBCTL().fetch_allinfo()
+                if refreshed_hubs:
+                    self._usbhubs = refreshed_hubs
+                    refreshed_hub = next(
+                        (entry for entry in refreshed_hubs if entry.location == hub_location),
+                        None,
+                    )
+                    if refreshed_hub is not None:
+                        self._log_unexpected_port_changes(
+                            hub_location,
+                            port_number,
+                            before_map,
+                            self._port_state_map(refreshed_hub),
+                        )
+                        hub = refreshed_hub
+                    else:
+                        logger.warning(
+                            "Hub %s missing after refresh; keeping previous in-memory status",
+                            hub_location,
+                        )
+                else:
+                    logger.warning(
+                        "Could not refresh hub status after action; using in-memory status"
+                    )
+
                 self.send_mqtt_hubstatus(client, hub)
+
+    def _port_state_map(self, usbhub):
+        return {port.number: port.enabled for port in usbhub._ports}
+
+    def _log_unexpected_port_changes(self, hub_location, target_port, before_map, after_map):
+        changed_ports = []
+        for port_number, before_state in before_map.items():
+            if port_number == target_port or port_number not in after_map:
+                continue
+            after_state = after_map[port_number]
+            if before_state != after_state:
+                changed_ports.append((port_number, before_state, after_state))
+
+        if changed_ports:
+            logger.warning(
+                "Possible whole-hub side effect detected on HUB%s while toggling POWER%s: %s",
+                hub_location,
+                target_port,
+                ", ".join(
+                    "POWER{} {}->{}".format(
+                        number,
+                        "ON" if before else "OFF",
+                        "ON" if after else "OFF",
+                    )
+                    for number, before, after in changed_ports
+                ),
+            )
+        else:
+            logger.info(
+                "Verified targeted change on HUB%s POWER%s without side effects",
+                hub_location,
+                target_port,
+            )
 
     def loop_forever(self):
         try:

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is inspired by Keep a Changelog.
 This project follows semantic versioning where practical.
 
+## [1.1.2] - 2026-06-06
+
+### Added
+- Startup capability logging for each detected hub (`power_switching` mode from `uhubctl`).
+- Warning when a hub likely does not provide true per-port switching (possible whole-hub side effects).
+- Post-action verification that compares port states before/after a toggle and logs unexpected non-target changes.
+
+### Changed
+- Bridge version updated to `v1.1.2` in startup logging.
+- Add-on version bumped from `1.1.1` to `1.1.2`.
+
 ## [1.1.1] - 2026-06-06
 
 ### Fixed

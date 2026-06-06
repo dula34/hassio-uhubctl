@@ -82,7 +82,22 @@ mqtt:
       payload_off: "OFF"
 ```
 
+## Troubleshooting
+
+At startup, the add-on now logs each hub power switching mode reported by `uhubctl`:
+
+- `Hub <location> capability: power_switching=<mode>`
+
+If the mode is not recognized as true per-port switching, you will also see:
+
+- `Hub <location> may not support true per-port power switching ...`
+
+After each `POWER<port>` command, the add-on refreshes hub status and checks whether non-target ports changed unexpectedly. If that happens, it logs:
+
+- `Possible whole-hub side effect detected ...`
+
+These logs help confirm whether your hub behaves as real per-port control or as grouped/whole-hub power switching.
+
 ## More details
 
 See `docs.md` in this folder for a deeper technical reference and troubleshooting guide.
-
