@@ -9,6 +9,8 @@ import subprocess
 import paho.mqtt.client as mqtt
 from paho.mqtt.client import CallbackAPIVersion
 
+APP_VERSION = "1.1.0"
+
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
 logger.addHandler(handler)
@@ -233,6 +235,10 @@ class USBHUB_MQTT:
             self._cfg = json.load(opt_file)
             self._usbhubs = []
             self._will = (self._cfg["AVAILABILITY_TOPIC"], "Offline", 1, True)
+
+        self._cfg.setdefault("DISCOVERY_ENABLED", True)
+        self._cfg.setdefault("DISCOVERY_PREFIX", "homeassistant")
+        self._cfg.setdefault("FORCE_OPTIMISTIC", False)
         
         # Validate required config keys
         required_keys = ["AVAILABILITY_TOPIC", "STATUS_TOPIC", "COMMAND_TOPIC"]
@@ -241,6 +247,76 @@ class USBHUB_MQTT:
                 raise USBHUB_MQTT_Error("Missing required configuration: {}".format(key))
         
         logger.info("Configuration loaded successfully")
+
+    def _to_object_id(self, value):
+        return re.sub(r"[^a-z0-9_]+", "_", value.lower()).strip("_")
+
+    def _discovery_device_payload(self, usbhub):
+        hub_id = self._to_object_id("uhubctl_hub_{}".format(usbhub.location))
+        return {
+            "identifiers": [hub_id],
+            "name": "USB Hub {}".format(usbhub.location),
+            "manufacturer": "uhubctl",
+            "model": "{:04x}:{:04x}".format(usbhub.vid, usbhub.pid),
+            "sw_version": APP_VERSION,
+        }
+
+    def _discovery_payload(self, usbhub, port):
+        object_id = self._to_object_id(
+            "uhubctl_hub_{}_power{}".format(usbhub.location, port.number)
+        )
+        payload = {
+            "name": "HUB{} POWER{}".format(usbhub.location, port.number),
+            "unique_id": object_id,
+            "object_id": object_id,
+            "state_topic": "{prefix}/HUB{location}/STATE".format(
+                prefix=self._cfg["STATUS_TOPIC"], location=usbhub.location
+            ),
+            "value_template": "{{{{ value_json.POWER{} }}}}".format(port.number),
+            "command_topic": "{prefix}/HUB{location}/POWER{number}".format(
+                prefix=self._cfg["COMMAND_TOPIC"],
+                location=usbhub.location,
+                number=port.number,
+            ),
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "availability_topic": self._cfg["AVAILABILITY_TOPIC"],
+            "payload_available": "Online",
+            "payload_not_available": "Offline",
+            "icon": "mdi:usb-port",
+            "device": self._discovery_device_payload(usbhub),
+        }
+
+        if self._cfg["FORCE_OPTIMISTIC"]:
+            payload["optimistic"] = True
+
+        return object_id, payload
+
+    def send_mqtt_discovery(self, client):
+        if not self._cfg["DISCOVERY_ENABLED"]:
+            logger.info("MQTT autodiscovery is disabled")
+            return
+
+        if not self._usbhubs:
+            logger.debug("No USB hubs found for MQTT autodiscovery")
+            return
+
+        discovery_prefix = self._cfg["DISCOVERY_PREFIX"].rstrip("/")
+        if not discovery_prefix:
+            discovery_prefix = "homeassistant"
+        for hub in self._usbhubs:
+            for port in hub._ports:
+                object_id, payload = self._discovery_payload(hub, port)
+                topic = "{}/switch/{}/config".format(discovery_prefix, object_id)
+                client.publish(
+                    topic=topic,
+                    payload=json.dumps(payload),
+                    qos=1,
+                    retain=True,
+                )
+                logger.info(
+                    "Published MQTT discovery: topic={topic}".format(topic=topic)
+                )
 
     def make_json_portstatus(self, usbhub):
         ret = {
@@ -308,6 +384,7 @@ class USBHUB_MQTT:
         else:
             logger.info("Found {count} USB hub(s)".format(count=len(self._usbhubs)))
 
+        self.send_mqtt_discovery(client)
         self.send_mqtt_hubstatus(client)
         client.publish(
             topic=self._cfg["AVAILABILITY_TOPIC"], payload="Online", qos=1, retain=True
@@ -451,7 +528,7 @@ if __name__ == "__main__":
         logger.setLevel(level=args["log"].upper())
         handler.setLevel(level=args["log"].upper())
 
-        logger.info("Starting MQTT - uhubctl bridge v1.0.0")
+        logger.info("Starting MQTT - uhubctl bridge v{}".format(APP_VERSION))
         usbhub_mqtt = USBHUB_MQTT(args["config"])
         usbhub_mqtt.loop_forever()
     except USBHUB_MQTT_Error as e:

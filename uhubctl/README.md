@@ -5,8 +5,9 @@ This add-on exposes `uhubctl` USB port power control over MQTT so you can switch
 ## What it does
 
 - Detects supported USB smart hubs via `uhubctl`
-- Publishes hub and port state to MQTT
+- Publishes hub and port state to MQTT (retained)
 - Accepts MQTT commands to turn individual hub ports `ON`/`OFF`
+- Publishes Home Assistant MQTT autodiscovery switch entities for each USB port
 - Publishes Last Will and availability status (`Online`/`Offline`)
 
 ## Requirements
@@ -32,6 +33,9 @@ The add-on supports these options:
 | `AVAILABILITY_TOPIC` | string | `tele/uhubctl/localhost/LWT` |
 | `STATUS_TOPIC` | string | `tele/uhubctl/localhost` |
 | `COMMAND_TOPIC` | string | `cmnd/uhubctl/localhost` |
+| `DISCOVERY_ENABLED` | bool | `true` |
+| `DISCOVERY_PREFIX` | string | `homeassistant` |
+| `FORCE_OPTIMISTIC` | bool | `false` |
 | `LOG_LEVEL` | enum | `info` |
 
 `LOG_LEVEL` values: `debug`, `info`, `warn`, `error`, `critical`.
@@ -41,6 +45,7 @@ The add-on supports these options:
 - Availability: `<AVAILABILITY_TOPIC>`
 - Hub state: `<STATUS_TOPIC>/HUB<location>/STATE`
 - Commands: `<COMMAND_TOPIC>/HUB<location>/POWER<port>`
+- Autodiscovery config: `<DISCOVERY_PREFIX>/switch/uhubctl_hub_<location>_power<port>/config`
 
 Example command topic:
 
@@ -54,7 +59,13 @@ Example command payload:
 ON
 ```
 
-## Home Assistant example
+## Home Assistant
+
+Manual YAML is no longer required when `DISCOVERY_ENABLED=true` (default). Home Assistant discovers each port as a switch automatically.
+
+`FORCE_OPTIMISTIC=true` can be used when the switch state appears unstable; Home Assistant will then update state immediately after each command.
+
+### Manual YAML example (optional fallback)
 
 ```yaml
 mqtt:

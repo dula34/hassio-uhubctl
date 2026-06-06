@@ -8,9 +8,10 @@ The add-on runs a Python bridge that:
 
 1. Discovers USB hubs using `uhubctl`
 2. Connects to Home Assistant's configured MQTT service
-3. Publishes hub/port status as JSON
-4. Listens for MQTT control commands
-5. Executes `uhubctl` actions and republishes updated state
+3. Publishes Home Assistant MQTT autodiscovery entities for each hub port
+4. Publishes hub/port status as JSON
+5. Listens for MQTT control commands
+6. Executes `uhubctl` actions and republishes updated state
 
 ## Runtime behavior
 
@@ -58,6 +59,31 @@ Example state payload:
 }
 ```
 
+State messages are retained. This lets Home Assistant restore the latest known switch state right after startup/reconnect.
+
+### Home Assistant autodiscovery
+
+Discovery topic format:
+
+```text
+<DISCOVERY_PREFIX>/switch/uhubctl_hub_<location>_power<port>/config
+```
+
+Default example:
+
+```text
+homeassistant/switch/uhubctl_hub_3_4_power1/config
+```
+
+Discovery payload includes:
+
+- `state_topic` + `value_template` (`POWER<port>`)
+- `command_topic`
+- `availability_topic`
+- `payload_on` / `payload_off`
+- `device` metadata for hub grouping in Home Assistant UI
+- optional `optimistic: true` when `FORCE_OPTIMISTIC=true`
+
 ### Command subscription
 
 Command topic format:
@@ -85,6 +111,9 @@ Defined in `config.json`.
 | `AVAILABILITY_TOPIC` | Yes | MQTT topic used for availability/LWT |
 | `STATUS_TOPIC` | Yes | Prefix for hub state topics |
 | `COMMAND_TOPIC` | Yes | Prefix for command topics |
+| `DISCOVERY_ENABLED` | No | Enable/disable Home Assistant MQTT autodiscovery publishing |
+| `DISCOVERY_PREFIX` | No | MQTT discovery prefix (`homeassistant` by default) |
+| `FORCE_OPTIMISTIC` | No | Force optimistic switch behavior even when `state_topic` exists |
 | `LOG_LEVEL` | No | Verbosity level (`debug`, `info`, `warn`, `error`, `critical`) |
 
 ## Logging

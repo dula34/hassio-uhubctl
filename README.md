@@ -9,6 +9,7 @@ This add-on takes advantage of the API provided by Home Assistant and is extreme
 - ✅ Control USB power per-port on smart USB hubs
 - ✅ MQTT-based communication
 - ✅ Real-time status reporting
+- ✅ Home Assistant MQTT autodiscovery (switch per USB port)
 - ✅ Support for multiple hub architectures (amd64, armhf, armv7, aarch64, i386)
 - ✅ Home Assistant integration ready
 - ✅ Health checks included
@@ -50,9 +51,18 @@ By default, the add-on publishes telemetry data to the topic `tele/uhubctl/local
 | AVAILABILITY_TOPIC | string | `tele/uhubctl/localhost/LWT` | MQTT topic for availability status                 |
 | STATUS_TOPIC       | string | `tele/uhubctl/localhost`     | MQTT topic prefix for hub status                   |
 | COMMAND_TOPIC      | string | `cmnd/uhubctl/localhost`     | MQTT topic prefix for commands                     |
+| DISCOVERY_ENABLED  | bool   | `true`                       | Enable Home Assistant MQTT autodiscovery           |
+| DISCOVERY_PREFIX   | string | `homeassistant`              | Home Assistant MQTT discovery prefix               |
+| FORCE_OPTIMISTIC   | bool   | `false`                      | Force optimistic switch mode in discovery payloads |
 | LOG_LEVEL          | list   | `info`                       | Logging level (debug, info, warn, error, critical) |
 
-### Example Home Assistant Configuration
+### Home Assistant Configuration
+
+With default settings, switches are discovered automatically via MQTT discovery. Manual YAML is optional fallback only.
+
+If switch states behave incorrectly on your setup, set `FORCE_OPTIMISTIC` to `true`.
+
+### Optional Manual YAML Example
 
 Here is an example of a yaml entry in Home Assistant to control `Port 1` of `HUB3-4`.
 

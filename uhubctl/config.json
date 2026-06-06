@@ -1,6 +1,6 @@
 {
     "name": "uhubctl",
-    "version": "1.0.6",
+    "version": "1.1.0",
     "slug": "uhubctl",
     "description": "MQTT Bridge for uhubctl - control USB power per-port on smart USB hubs",
     "arch": [
@@ -20,12 +20,18 @@
     "options": {
         "AVAILABILITY_TOPIC": "tele/uhubctl/localhost/LWT",
         "STATUS_TOPIC": "tele/uhubctl/localhost",
-        "COMMAND_TOPIC": "cmnd/uhubctl/localhost"
+        "COMMAND_TOPIC": "cmnd/uhubctl/localhost",
+        "DISCOVERY_ENABLED": true,
+        "DISCOVERY_PREFIX": "homeassistant",
+        "FORCE_OPTIMISTIC": false
     },
     "schema": {
         "AVAILABILITY_TOPIC": "str",
         "STATUS_TOPIC": "str",
         "COMMAND_TOPIC": "str",
+        "DISCOVERY_ENABLED": "bool?",
+        "DISCOVERY_PREFIX": "str?",
+        "FORCE_OPTIMISTIC": "bool?",
         "LOG_LEVEL": "list(debug|info|warn|error|critical)?"
     }
 }
