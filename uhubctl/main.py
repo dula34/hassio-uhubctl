@@ -9,7 +9,7 @@ import subprocess
 import paho.mqtt.client as mqtt
 from paho.mqtt.client import CallbackAPIVersion
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -111,7 +111,7 @@ class UHUBCTL:
 
         for lineidx_hubheader in lineidxs_hubheader:
             parsed_line = re.search(
-                r"status for hub ([0-9-]+) \[([0-9a-f]{4}):([0-9a-f]{4}).*USB (\d)\.\d{2}, (\d+) ports, ppps",
+                r"status for hub ([0-9A-Za-z_.:-]+) \[([0-9a-fA-F]{4}):([0-9a-fA-F]{4}).*USB (\d)\.\d{2}, (\d+) ports, [a-z]{4}",
                 result[lineidx_hubheader],
             )
             if parsed_line is None:
@@ -133,7 +133,7 @@ class UHUBCTL:
                 else lineidx_port_start + 1
             )
 
-            for lineidx in range(lineidx_port_start, lineidx_port_end):
+            for lineidx in range(lineidx_port_start, min(lineidx_port_end, len(result))):
                 # Port Information
                 parsed_line = re.search(r"Port (\d+): (\d{4})", result[lineidx])
                 if parsed_line is None:
@@ -207,7 +207,17 @@ class UHUBCTL:
             stdout = ret.stdout
 
             # _parser returns [Current status, New status]
-            newstatus_hub = self._parser(stdout, action=True)[-1]
+            parsed = self._parser(stdout, action=True)
+            if not parsed or not parsed[-1]._ports:
+                logger.error(
+                    "Failed to parse uhubctl action output: hub={location}, port={port}".format(
+                        location=port.hub_location,
+                        port=port.number,
+                    )
+                )
+                return False
+
+            newstatus_hub = parsed[-1]
             newstatus_port = newstatus_hub._ports[0]
 
             if newstatus_port.enabled:
@@ -401,9 +411,10 @@ class USBHUB_MQTT:
         pass
 
     def on_mqtt_ctrl_message(self, client, userdata, message):
+        payload = message.payload.decode(errors="replace")
         logger.info(
             "Received a control message: topic={topic}, payload={payload}".format(
-                topic=message.topic, payload=message.payload.decode()
+                topic=message.topic, payload=payload
             )
         )
 
@@ -416,7 +427,10 @@ class USBHUB_MQTT:
         try:
             command = parsed_topic[-1]
             hub_name = parsed_topic[-2]
-            hub_location = re.search(r"HUB([0-9-]+)", hub_name).group(1)
+            hub_location_match = re.search(r"HUB([0-9A-Za-z_.:-]+)", hub_name)
+            if hub_location_match is None:
+                raise AttributeError
+            hub_location = hub_location_match.group(1)
         except (IndexError, AttributeError):
             logger.error("Failed to parse the topic string")
             return False
@@ -437,12 +451,13 @@ class USBHUB_MQTT:
                 return False
 
             try:
-                action = message.payload.decode()
-                UHUBCTL().do_action(port, action)
+                action = payload.strip()
+                action_ok = UHUBCTL().do_action(port, action)
             except Exception:
                 logger.exception("Failed to execute an action")
+                action_ok = False
 
-            if hub is not None:
+            if hub is not None and action_ok:
                 self.send_mqtt_hubstatus(client, hub)
 
     def loop_forever(self):

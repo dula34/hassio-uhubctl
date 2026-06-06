@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is inspired by Keep a Changelog.
 This project follows semantic versioning where practical.
 
+## [1.1.1] - 2026-06-06
+
+### Fixed
+- Improved command handling stability for Home Assistant MQTT switches to avoid callback crashes on malformed payload/topic inputs.
+- Made `uhubctl` output parsing more robust for hub headers and action responses.
+- Added guard logic to prevent index errors when parsing action results before publishing updated state.
+
+### Changed
+- Bridge version updated to `v1.1.1` in startup logging.
+- Add-on version bumped from `1.1.0` to `1.1.1`.
+
 ## [1.1.0] - 2026-06-06
 
 ### Added
