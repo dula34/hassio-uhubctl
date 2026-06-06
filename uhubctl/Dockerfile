@@ -7,7 +7,8 @@ RUN \
     set -e \
     && apk add --no-cache \
         python3 \
-        py3-pip && \
+        py3-pip \
+        libusb && \
     apk add --no-cache --virtual .build-dependencies \
         build-base \
         linux-headers \

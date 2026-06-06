@@ -103,7 +103,7 @@ class UHUBCTL:
                 raise ValueError("No hub headers found")
         except ValueError as e:
             logger.error("Failed to find any smart hubs: {}".format(str(e)))
-            return False
+            return []
 
         logger.debug("Found {count} hub(s) in output".format(count=len(lineidxs_hubheader)))
 
@@ -172,10 +172,12 @@ class UHUBCTL:
             ret = run_in_shell("uhubctl")
             stdout = ret.stdout
 
-            return self._parser(stdout)
+            result = self._parser(stdout)
+            return result if result else []
+            
         except Exception:
             logger.exception("Failed to fetch current status")
-            return None
+            return []
 
     def do_action(self, port, action):
         try:
@@ -289,7 +291,7 @@ class USBHUB_MQTT:
             logger.error("MQTT connection failed with reason code: {}".format(str(rc)))
             logger.error("Connection failed - will attempt to reconnect...")
             return
-
+        
         logger.info("MQTT Connected successfully")
 
         result, mid = client.subscribe(self._cfg["COMMAND_TOPIC"] + "/#", 1)
@@ -301,9 +303,8 @@ class USBHUB_MQTT:
         )
 
         self._usbhubs = UHUBCTL().fetch_allinfo()
-        if self._usbhubs is None:
-            logger.warning("No USB hubs found. Will retry on next connection.")
-            self._usbhubs = []
+        if not self._usbhubs:
+            logger.warning("No USB hubs found or uhubctl not available")
         else:
             logger.info("Found {count} USB hub(s)".format(count=len(self._usbhubs)))
 
