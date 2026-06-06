@@ -45,29 +45,29 @@ By default, the add-on publishes telemetry data to the topic `tele/uhubctl/local
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| AVAILABILITY_TOPIC | string | `tele/uhubctl/localhost/LWT` | MQTT topic for availability status |
-| STATUS_TOPIC | string | `tele/uhubctl/localhost` | MQTT topic prefix for hub status |
-| COMMAND_TOPIC | string | `cmnd/uhubctl/localhost` | MQTT topic prefix for commands |
-| LOG_LEVEL | list | `info` | Logging level (debug, info, warn, error, critical) |
+| Option             | Type   | Default                      | Description                                        |
+|--------------------|--------|------------------------------|----------------------------------------------------|
+| AVAILABILITY_TOPIC | string | `tele/uhubctl/localhost/LWT` | MQTT topic for availability status                 |
+| STATUS_TOPIC       | string | `tele/uhubctl/localhost`     | MQTT topic prefix for hub status                   |
+| COMMAND_TOPIC      | string | `cmnd/uhubctl/localhost`     | MQTT topic prefix for commands                     |
+| LOG_LEVEL          | list   | `info`                       | Logging level (debug, info, warn, error, critical) |
 
 ### Example Home Assistant Configuration
 
 Here is an example of a yaml entry in Home Assistant to control `Port 1` of `HUB3-4`.
 
 ```yaml
-switch:
-  - platform: mqtt
-    name: USB Fan
-    unique_id: usb-fan
-    icon: "mdi:fan"
-    state_topic: "tele/uhubctl/localhost/HUB3-4/STATE"
-    value_template: "{{ value_json.POWER1 }}"
-    command_topic: "cmnd/uhubctl/localhost/HUB3-4/POWER1"
-    availability_topic: "tele/uhubctl/localhost/LWT"
-    payload_available: "Online"
-    payload_not_available: "Offline"
+mqtt:
+  switch:
+    - name: USB Fan
+      unique_id: usb-fan
+      icon: "mdi:fan"
+      state_topic: "tele/uhubctl/localhost/HUB3-4/STATE"
+      value_template: "{{ value_json.POWER1 }}"
+      command_topic: "cmnd/uhubctl/localhost/HUB3-4/POWER1"
+      availability_topic: "tele/uhubctl/localhost/LWT"
+      payload_available: "Online"
+      payload_not_available: "Offline"
 ```
 
 ## Troubleshooting
